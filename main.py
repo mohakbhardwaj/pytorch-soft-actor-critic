@@ -7,6 +7,9 @@ import torch
 from sac import SAC
 from torch.utils.tensorboard import SummaryWriter
 from replay_memory import ReplayMemory
+import mj_envs
+
+from utils import stack_tensor_dict_list
 
 parser = argparse.ArgumentParser(description='PyTorch Soft Actor-Critic Args')
 parser.add_argument('--env-name', default="HalfCheetah-v2",
@@ -15,6 +18,10 @@ parser.add_argument('--policy', default="Gaussian",
                     help='Policy Type: Gaussian | Deterministic (default: Gaussian)')
 parser.add_argument('--eval', type=bool, default=True,
                     help='Evaluates a policy a policy every 10 episode (default: True)')
+parser.add_argument('--eval_freq', type=int, default=10, metavar='N',
+                    help='number of episodes to eval after (default: 40)')
+parser.add_argument('--eval_episodes', type=int, default=10, metavar='N',
+                    help='number of eval episodes (default: 10)')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
                     help='discount factor for reward (default: 0.99)')
 parser.add_argument('--tau', type=float, default=0.005, metavar='G',
@@ -27,6 +34,8 @@ parser.add_argument('--alpha', type=float, default=0.2, metavar='G',
 parser.add_argument('--automatic_entropy_tuning', type=bool, default=False, metavar='G',
                     help='Automaically adjust α (default: False)')
 parser.add_argument('--seed', type=int, default=123456, metavar='N',
+                    help='random seed (default: 123456)')
+parser.add_argument('--test_seed', type=int, default=123456, metavar='N',
                     help='random seed (default: 123456)')
 parser.add_argument('--batch_size', type=int, default=256, metavar='N',
                     help='batch size (default: 256)')
@@ -42,8 +51,10 @@ parser.add_argument('--target_update_interval', type=int, default=1, metavar='N'
                     help='Value target update per no. of updates per step (default: 1)')
 parser.add_argument('--replay_size', type=int, default=1000000, metavar='N',
                     help='size of replay buffer (default: 10000000)')
+
 parser.add_argument('--cuda', action="store_true",
                     help='run on CUDA (default: False)')
+
 args = parser.parse_args()
 
 # Environment
@@ -59,8 +70,8 @@ np.random.seed(args.seed)
 agent = SAC(env.observation_space.shape[0], env.action_space, args)
 
 #Tesnorboard
-writer = SummaryWriter('runs/{}_SAC_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
-                                                             args.policy, "autotune" if args.automatic_entropy_tuning else ""))
+writer = SummaryWriter('runs/{}_SAC_{}_{}_{}_seed_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
+                                                             args.policy, "autotune" if args.automatic_entropy_tuning else "", args.seed))
 
 # Memory
 memory = ReplayMemory(args.replay_size, args.seed)
@@ -69,10 +80,53 @@ memory = ReplayMemory(args.replay_size, args.seed)
 total_numsteps = 0
 updates = 0
 
-for i_episode in itertools.count(1):
+for i_episode in itertools.count(0):
+    #run eval if required
+    if i_episode % args.eval_freq == 0 and args.eval is True:
+        avg_reward = 0.
+        avg_success = 0.
+        episodes = args.eval_episodes #10
+        for k  in range(episodes):
+            env.seed(args.test_seed + 12345*k)
+            state = env.reset()
+            episode_reward = 0
+            episode_reward_list = []
+            episode_infos = []
+            ep_success = 0.
+            done = False
+            while not done:
+                action = agent.select_action(state, evaluate=True)
+
+                next_state, reward, done, info = env.step(action)
+                if isinstance(reward, np.ndarray):
+                    reward=reward[0]
+                episode_reward += reward
+                episode_infos.append(info)
+
+                state = next_state
+            avg_reward += episode_reward
+            episode_reward_list.append(episode_reward)
+            ep_info_dict = [{'env_infos': stack_tensor_dict_list(episode_infos)}]
+            success_metric = env.evaluate_success(ep_info_dict)
+            avg_success += success_metric
+
+        avg_reward /= episodes
+        avg_success /= episodes
+        std_reward = np.std(episode_reward_list)
+
+
+        writer.add_scalar('test/avg_reward', avg_reward, i_episode)
+        writer.add_scalar('test/avg_success', avg_success, i_episode)
+
+        print("----------------------------------------")
+        print("Test Episodes: {}, Avg. Reward: {} Avg. Success: {} Std. Reward: {}".format(episodes, round(avg_reward, 2), round(avg_success, 2), round(std_reward, 2)))
+        print("----------------------------------------")
+
+
     episode_reward = 0
     episode_steps = 0
     done = False
+    env.seed(args.seed + 12345*i_episode)
     state = env.reset()
 
     while not done:
@@ -95,6 +149,8 @@ for i_episode in itertools.count(1):
                 updates += 1
 
         next_state, reward, done, _ = env.step(action) # Step
+        if isinstance(reward, np.ndarray):
+            reward=reward[0]
         episode_steps += 1
         total_numsteps += 1
         episode_reward += reward
@@ -113,30 +169,32 @@ for i_episode in itertools.count(1):
     writer.add_scalar('reward/train', episode_reward, i_episode)
     print("Episode: {}, total numsteps: {}, episode steps: {}, reward: {}".format(i_episode, total_numsteps, episode_steps, round(episode_reward, 2)))
 
-    if i_episode % 10 == 0 and args.eval is True:
-        avg_reward = 0.
-        episodes = 10
-        for _  in range(episodes):
-            state = env.reset()
-            episode_reward = 0
-            done = False
-            while not done:
-                action = agent.select_action(state, evaluate=True)
+    # if i_episode % args.eval_freq == 0 and args.eval is True:
+    #     avg_reward = 0.
+    #     episodes = args.eval_episodes #10
+    #     for _  in range(episodes):
+    #         state = env.reset()
+    #         episode_reward = 0
+    #         done = False
+    #         while not done:
+    #             action = agent.select_action(state, evaluate=True)
 
-                next_state, reward, done, _ = env.step(action)
-                episode_reward += reward
-
-
-                state = next_state
-            avg_reward += episode_reward
-        avg_reward /= episodes
+    #             next_state, reward, done, _ = env.step(action)
+    #             if isinstance(reward, np.ndarray):
+    #                 reward=reward[0]
+    #             episode_reward += reward
 
 
-        writer.add_scalar('avg_reward/test', avg_reward, i_episode)
+    #             state = next_state
+    #         avg_reward += episode_reward
+    #     avg_reward /= episodes
 
-        print("----------------------------------------")
-        print("Test Episodes: {}, Avg. Reward: {}".format(episodes, round(avg_reward, 2)))
-        print("----------------------------------------")
+
+    #     writer.add_scalar('avg_reward/test', avg_reward, i_episode)
+
+    #     print("----------------------------------------")
+    #     print("Test Episodes: {}, Avg. Reward: {}".format(episodes, round(avg_reward, 2)))
+    #     print("----------------------------------------")
 
 env.close()
 

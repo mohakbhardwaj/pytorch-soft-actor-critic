@@ -1,0 +1,2 @@
+====Running SAC experiment with seed 12345 on instance with IP = ec2-3-101-25-48.us-west-1.compute.amazonaws.com ==== 
+====Running SAC experiment with seed 12345 on instance with IP = ec2-3-101-25-48.us-west-1.compute.amazonaws.com ==== 

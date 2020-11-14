@@ -8,6 +8,7 @@ from sac import SAC
 from torch.utils.tensorboard import SummaryWriter
 from replay_memory import ReplayMemory
 import mj_envs
+import csv
 
 from utils import stack_tensor_dict_list
 
@@ -70,8 +71,10 @@ np.random.seed(args.seed)
 agent = SAC(env.observation_space.shape[0], env.action_space, args)
 
 #Tesnorboard
-writer = SummaryWriter('runs/{}_SAC_{}_{}_{}_seed_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
-                                                             args.policy, "autotune" if args.automatic_entropy_tuning else "", args.seed))
+path = 'runs/{}_SAC_{}_{}_{}_seed_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
+                                             args.policy, "autotune" if args.automatic_entropy_tuning else "", args.seed)
+writer = SummaryWriter(path)
+
 
 # Memory
 memory = ReplayMemory(args.replay_size, args.seed)
@@ -86,11 +89,12 @@ for i_episode in itertools.count(0):
         avg_reward = 0.
         avg_success = 0.
         episodes = args.eval_episodes #10
+        episode_reward_list = []
+
         for k  in range(episodes):
             env.seed(args.test_seed + 12345*k)
             state = env.reset()
             episode_reward = 0
-            episode_reward_list = []
             episode_infos = []
             ep_success = 0.
             done = False
@@ -113,6 +117,11 @@ for i_episode in itertools.count(0):
         avg_reward /= episodes
         avg_success /= episodes
         std_reward = np.std(episode_reward_list)
+        
+        # print(episode_reward_list)
+        with open(path+'/log.csv', 'a') as f:
+            csv_writer = csv.writer(f)
+            csv_writer.writerow(episode_reward_list)
 
 
         writer.add_scalar('test/avg_reward', avg_reward, i_episode)

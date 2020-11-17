@@ -9,6 +9,8 @@ from torch.utils.tensorboard import SummaryWriter
 from replay_memory import ReplayMemory
 import mj_envs
 import csv
+from copy import deepcopy
+from mjmpc.envs import GymEnvWrapper
 
 from utils import stack_tensor_dict_list
 
@@ -99,9 +101,9 @@ for i_episode in itertools.count(0):
             ep_success = 0.
             done = False
             while not done:
-                action = agent.select_action(state, evaluate=True)
+                action = agent.select_action(deepcopy(state), evaluate=True)
 
-                next_state, reward, done, info = env.step(action)
+                next_state, reward, done, info = env.step(deepcopy(action))
                 if isinstance(reward, np.ndarray):
                     reward=reward[0]
                 episode_reward += reward
@@ -136,14 +138,14 @@ for i_episode in itertools.count(0):
     episode_steps = 0
     done = False
     env.seed(args.seed + 12345*i_episode)
+    env.action_space.seed(args.seed + 12345*i_episode)
     state = env.reset()
 
     while not done:
         if args.start_steps > total_numsteps:
             action = env.action_space.sample()  # Sample random action
         else:
-            action = agent.select_action(state)  # Sample action from policy
-
+            action = agent.select_action(deepcopy(state))  # Sample action from policy
         if len(memory) > args.batch_size:
             # Number of updates per step in environment
             for i in range(args.updates_per_step):
@@ -157,7 +159,10 @@ for i_episode in itertools.count(0):
                 writer.add_scalar('entropy_temprature/alpha', alpha, updates)
                 updates += 1
 
-        next_state, reward, done, _ = env.step(action) # Step
+        next_state, reward, done, _ = env.step(deepcopy(action)) # Step
+        # print(action, reward, state, next_state)
+        # input('....')
+
         if isinstance(reward, np.ndarray):
             reward=reward[0]
         episode_steps += 1
